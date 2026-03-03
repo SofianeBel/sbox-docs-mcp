@@ -46,6 +46,13 @@ src/
 - **Zod schemas** — defined in `src/schemas/index.ts`, tool handlers receive pre-validated params
 - **Transport** — stdio (StdioServerTransport) for universal client compatibility
 
+## Code Style
+
+- **Comments in English only**
+- Comment only when necessary: complex logic, non-obvious algorithms, or widely-used variables/constants that need context
+- Do NOT comment obvious code, simple assignments, or self-explanatory function names
+- Prefer clear naming over comments — if you need a comment to explain what code does, rename the variable/function first
+
 ## Git Flow
 
 ```
