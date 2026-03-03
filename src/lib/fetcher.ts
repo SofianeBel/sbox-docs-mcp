@@ -31,6 +31,15 @@ turndown.addRule('fencedCodeBlock', {
   },
 })
 
+function normalizeDocUrl(url: URL): string {
+  // Normalize /doc/xxx to /s/sbox-dev/doc/xxx for consistency
+  if (url.pathname.startsWith('/doc/')) {
+    url.pathname = `/s/sbox-dev${url.pathname}`
+  }
+  url.hash = ''
+  return url.href.replace(/\/$/, '')
+}
+
 function extractDocLinks($: cheerio.CheerioAPI, baseUrl: string): string[] {
   const links = new Set<string>()
   const base = new URL(baseUrl)
@@ -41,13 +50,14 @@ function extractDocLinks($: cheerio.CheerioAPI, baseUrl: string): string[] {
 
     try {
       const resolved = new URL(href, base)
-      if (
-        resolved.hostname === 'docs.facepunch.com' &&
-        resolved.pathname.includes('/s/sbox-dev')
-      ) {
-        resolved.hash = ''
-        const clean = resolved.href.replace(/\/$/, '')
-        links.add(clean)
+      if (resolved.hostname !== 'docs.facepunch.com') return
+
+      const isSboxDoc =
+        resolved.pathname.includes('/s/sbox-dev') ||
+        resolved.pathname.startsWith('/doc/')
+
+      if (isSboxDoc) {
+        links.add(normalizeDocUrl(resolved))
       }
     } catch {
       // Invalid URL, skip
@@ -121,6 +131,63 @@ export async function crawlPage(url: string): Promise<CrawlResult> {
   // Parse content from cleaned HTML
   const { title, markdown } = parseHtml(html, url)
   return { markdown, title, url, links }
+}
+
+export interface OutlineDocument {
+  id: string
+  url: string
+  title: string
+  text: string
+}
+
+/**
+ * Fetch all documents from the Outline share via the search API.
+ * Returns documents with their Markdown text content already included.
+ */
+export async function fetchAllOutlineDocs(): Promise<OutlineDocument[]> {
+  const allDocs: OutlineDocument[] = []
+  let offset = 0
+  const limit = 100
+
+  while (true) {
+    const response = await fetch(`${config.docsApiUrl}/documents.search`, {
+      method: 'POST',
+      signal: AbortSignal.timeout(config.requestTimeoutMs),
+      headers: {
+        'Content-Type': 'application/json',
+        'User-Agent': config.userAgent,
+      },
+      body: JSON.stringify({ shareId: config.docsShareId, query: '', limit, offset }),
+    })
+
+    if (!response.ok) {
+      throw new Error(`Outline API error: ${response.status} ${response.statusText}`)
+    }
+
+    const data = await response.json() as {
+      data: Array<{ document: { id: string; url: string; title: string; text: string } }>
+      pagination: { total: number }
+    }
+
+    if (!data.data || data.data.length === 0) break
+
+    for (const item of data.data) {
+      const doc = item.document
+      if (doc.text && doc.text.length > 0) {
+        allDocs.push({
+          id: doc.id,
+          url: `${config.docsBaseUrl}${doc.url}`,
+          title: doc.title,
+          text: doc.text,
+        })
+      }
+    }
+
+    if (allDocs.length >= data.pagination.total) break
+    offset += limit
+  }
+
+  return allDocs
 }
 
 export async function fetchApiType(_typeName: string): Promise<FetchResult> {

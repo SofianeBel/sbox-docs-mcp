@@ -1,20 +1,20 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { SearchIndex } from '../lib/search-index.js'
 import { Cache } from '../lib/cache.js'
-import type { FetchResult } from '../lib/fetcher.js'
+import type { FetchResult, OutlineDocument } from '../lib/fetcher.js'
 
-// Mock the fetcher module
 vi.mock('../lib/fetcher.js', () => ({
-  crawlPage: vi.fn(),
+  fetchAllOutlineDocs: vi.fn(),
   fetchPage: vi.fn(),
+  crawlPage: vi.fn(),
   fetchApiType: vi.fn(),
 }))
 
-import { crawlPage } from '../lib/fetcher.js'
-const mockedCrawl = vi.mocked(crawlPage)
+import { fetchAllOutlineDocs } from '../lib/fetcher.js'
+const mockedFetchDocs = vi.mocked(fetchAllOutlineDocs)
 
-function makePage(url: string, title: string, content: string, links: string[] = []) {
-  return { url, title, markdown: content, links }
+function makeDoc(id: string, url: string, title: string, text: string): OutlineDocument {
+  return { id, url, title, text }
 }
 
 describe('SearchIndex', () => {
@@ -37,24 +37,11 @@ describe('SearchIndex', () => {
     expect(results).toEqual([])
   })
 
-  it('should initialize by crawling pages', async () => {
-    mockedCrawl
-      .mockResolvedValueOnce(
-        makePage(
-          'https://docs.facepunch.com/s/sbox-dev',
-          'S&box Docs',
-          '# S&box Documentation\n\nWelcome to s&box.',
-          ['https://docs.facepunch.com/s/sbox-dev/doc/components-abc'],
-        ),
-      )
-      .mockResolvedValueOnce(
-        makePage(
-          'https://docs.facepunch.com/s/sbox-dev/doc/components-abc',
-          'Components',
-          '# Components\n\nComponents are the building blocks of game logic.',
-          [],
-        ),
-      )
+  it('should initialize by fetching Outline documents', async () => {
+    mockedFetchDocs.mockResolvedValueOnce([
+      makeDoc('1', 'https://docs.facepunch.com/doc/home', 'S&box Docs', '# S&box Documentation\n\nWelcome to s&box.'),
+      makeDoc('2', 'https://docs.facepunch.com/doc/components-abc', 'Components', '# Components\n\nComponents are the building blocks of game logic.'),
+    ])
 
     await index.initialize()
 
@@ -63,23 +50,10 @@ describe('SearchIndex', () => {
   })
 
   it('should find pages by title', async () => {
-    mockedCrawl
-      .mockResolvedValueOnce(
-        makePage(
-          'https://docs.facepunch.com/s/sbox-dev',
-          'S&box Docs',
-          'Welcome to s&box documentation.',
-          ['https://docs.facepunch.com/s/sbox-dev/doc/networking-xyz'],
-        ),
-      )
-      .mockResolvedValueOnce(
-        makePage(
-          'https://docs.facepunch.com/s/sbox-dev/doc/networking-xyz',
-          'Networking & Multiplayer',
-          'The networking system syncs game state across clients.',
-          [],
-        ),
-      )
+    mockedFetchDocs.mockResolvedValueOnce([
+      makeDoc('1', 'https://docs.facepunch.com/doc/home', 'S&box Docs', 'Welcome to s&box documentation.'),
+      makeDoc('2', 'https://docs.facepunch.com/doc/networking-xyz', 'Networking & Multiplayer', 'The networking system syncs game state across clients.'),
+    ])
 
     await index.initialize()
 
@@ -89,14 +63,9 @@ describe('SearchIndex', () => {
   })
 
   it('should find pages by content', async () => {
-    mockedCrawl.mockResolvedValueOnce(
-      makePage(
-        'https://docs.facepunch.com/s/sbox-dev',
-        'Home',
-        'Components are C# classes that attach to GameObjects and provide behavior.',
-        [],
-      ),
-    )
+    mockedFetchDocs.mockResolvedValueOnce([
+      makeDoc('1', 'https://docs.facepunch.com/doc/home', 'Home', 'Components are C# classes that attach to GameObjects and provide behavior.'),
+    ])
 
     await index.initialize()
 
@@ -106,17 +75,12 @@ describe('SearchIndex', () => {
   })
 
   it('should respect the limit parameter', async () => {
-    mockedCrawl
-      .mockResolvedValueOnce(
-        makePage('https://docs.facepunch.com/s/sbox-dev', 'Home', 'component guide reference', [
-          'https://docs.facepunch.com/s/sbox-dev/doc/a-1',
-          'https://docs.facepunch.com/s/sbox-dev/doc/b-2',
-          'https://docs.facepunch.com/s/sbox-dev/doc/c-3',
-        ]),
-      )
-      .mockResolvedValueOnce(makePage('https://docs.facepunch.com/s/sbox-dev/doc/a-1', 'Component A', 'component a guide', []))
-      .mockResolvedValueOnce(makePage('https://docs.facepunch.com/s/sbox-dev/doc/b-2', 'Component B', 'component b reference', []))
-      .mockResolvedValueOnce(makePage('https://docs.facepunch.com/s/sbox-dev/doc/c-3', 'Component C', 'component c guide', []))
+    mockedFetchDocs.mockResolvedValueOnce([
+      makeDoc('1', 'https://docs.facepunch.com/doc/a', 'Home', 'component guide reference'),
+      makeDoc('2', 'https://docs.facepunch.com/doc/b', 'Component A', 'component a guide'),
+      makeDoc('3', 'https://docs.facepunch.com/doc/c', 'Component B', 'component b reference'),
+      makeDoc('4', 'https://docs.facepunch.com/doc/d', 'Component C', 'component c guide'),
+    ])
 
     await index.initialize()
 
@@ -125,10 +89,10 @@ describe('SearchIndex', () => {
   })
 
   it('should cache fetched pages for getPage reuse', async () => {
-    const pageUrl = 'https://docs.facepunch.com/s/sbox-dev'
-    mockedCrawl.mockResolvedValueOnce(
-      makePage(pageUrl, 'Home', 'Welcome content', []),
-    )
+    const pageUrl = 'https://docs.facepunch.com/doc/home'
+    mockedFetchDocs.mockResolvedValueOnce([
+      makeDoc('1', pageUrl, 'Home', 'Welcome content'),
+    ])
 
     await index.initialize()
 
@@ -137,37 +101,26 @@ describe('SearchIndex', () => {
     expect(cached?.title).toBe('Home')
   })
 
-  it('should skip pages that fail to fetch', async () => {
-    mockedCrawl
-      .mockResolvedValueOnce(
-        makePage('https://docs.facepunch.com/s/sbox-dev', 'Home', 'Welcome', [
-          'https://docs.facepunch.com/s/sbox-dev/doc/broken-page',
-        ]),
-      )
-      .mockRejectedValueOnce(new Error('404 Not Found'))
+  it('should handle API errors gracefully', async () => {
+    mockedFetchDocs.mockRejectedValueOnce(new Error('API error'))
 
-    await index.initialize()
-
-    expect(index.isInitialized).toBe(true)
-    expect(index.indexedCount).toBe(1)
+    await expect(index.initialize()).rejects.toThrow('API error')
   })
 
   it('should handle concurrent initialize calls', async () => {
-    mockedCrawl.mockResolvedValue(
-      makePage('https://docs.facepunch.com/s/sbox-dev', 'Home', 'Welcome', []),
-    )
+    mockedFetchDocs.mockResolvedValue([
+      makeDoc('1', 'https://docs.facepunch.com/doc/home', 'Home', 'Welcome'),
+    ])
 
-    // Call initialize twice concurrently
     await Promise.all([index.initialize(), index.initialize()])
 
-    // crawlPage should only be called once (not twice)
-    expect(mockedCrawl).toHaveBeenCalledTimes(1)
+    expect(mockedFetchDocs).toHaveBeenCalledTimes(1)
   })
 
   it('should use ensureInitialized for lazy init', async () => {
-    mockedCrawl.mockResolvedValueOnce(
-      makePage('https://docs.facepunch.com/s/sbox-dev', 'Home', 'Welcome', []),
-    )
+    mockedFetchDocs.mockResolvedValueOnce([
+      makeDoc('1', 'https://docs.facepunch.com/doc/home', 'Home', 'Welcome'),
+    ])
 
     expect(index.isInitialized).toBe(false)
     await index.ensureInitialized()

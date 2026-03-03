@@ -1,6 +1,5 @@
 import MiniSearch from 'minisearch'
-import { config } from './config.js'
-import { crawlPage } from './fetcher.js'
+import { fetchAllOutlineDocs } from './fetcher.js'
 import { Cache } from './cache.js'
 import type { FetchResult } from './fetcher.js'
 
@@ -89,56 +88,35 @@ export class SearchIndex {
       return
     }
 
-    this.initializing = this._crawlAndIndex()
+    this.initializing = this._fetchAndIndex()
     await this.initializing
     this.initializing = null
   }
 
-  private async _crawlAndIndex(): Promise<void> {
-    const visited = new Set<string>()
-    const queue: string[] = [config.docsBaseUrl]
-    let indexed = 0
+  private async _fetchAndIndex(): Promise<void> {
+    const outlineDocs = await fetchAllOutlineDocs()
 
-    while (queue.length > 0 && indexed < config.maxCrawlPages) {
-      const url = queue.shift()!
-      if (visited.has(url)) continue
-      visited.add(url)
-
-      try {
-        const result = await crawlPage(url)
-
-        // Cache the fetched page for getPage reuse
-        if (this.pageCache) {
-          this.pageCache.set(url, {
-            markdown: result.markdown,
-            title: result.title,
-            url: result.url,
-          })
-        }
-
-        const plainContent = stripMarkdownFormatting(result.markdown)
-
-        const doc: IndexedPage = {
-          id: url,
-          title: result.title,
-          content: plainContent,
-          url,
-        }
-
-        this.index.add(doc)
-        this.documents.set(url, doc)
-        indexed++
-
-        // Enqueue discovered links
-        for (const link of result.links) {
-          if (!visited.has(link)) {
-            queue.push(link)
-          }
-        }
-      } catch {
-        // Skip pages that fail to fetch
-        continue
+    for (const odoc of outlineDocs) {
+      // Cache each page for getPage reuse
+      if (this.pageCache) {
+        this.pageCache.set(odoc.url, {
+          markdown: odoc.text,
+          title: odoc.title,
+          url: odoc.url,
+        })
       }
+
+      const plainContent = stripMarkdownFormatting(odoc.text)
+
+      const doc: IndexedPage = {
+        id: odoc.url,
+        title: odoc.title,
+        content: plainContent,
+        url: odoc.url,
+      }
+
+      this.index.add(doc)
+      this.documents.set(odoc.url, doc)
     }
 
     this.initialized = true

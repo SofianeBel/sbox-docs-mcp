@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { fetchPage, crawlPage, fetchApiType } from '../lib/fetcher.js'
+import { fetchPage, crawlPage, fetchApiType, fetchAllOutlineDocs } from '../lib/fetcher.js'
 
 const SAMPLE_HTML = `
 <!DOCTYPE html>
@@ -97,6 +97,93 @@ describe('crawlPage', () => {
     expect(result.links).toBeInstanceOf(Array)
     // Should find the internal link in the HTML
     expect(result.links.some(l => l.includes('other-page-abc123'))).toBe(true)
+  })
+})
+
+describe('fetchAllOutlineDocs', () => {
+  it('should fetch all documents via Outline search API', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        data: [
+          { document: { id: '1', url: '/doc/page-a', title: 'Page A', text: 'Content A' } },
+          { document: { id: '2', url: '/doc/page-b', title: 'Page B', text: 'Content B' } },
+        ],
+        pagination: { total: 2 },
+      }),
+    })
+
+    const docs = await fetchAllOutlineDocs()
+
+    expect(docs).toHaveLength(2)
+    expect(docs[0].title).toBe('Page A')
+    expect(docs[0].text).toBe('Content A')
+    expect(docs[0].url).toContain('/doc/page-a')
+    expect(docs[1].title).toBe('Page B')
+  })
+
+  it('should paginate when there are more than 100 docs', async () => {
+    mockFetch
+      .mockReset()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          data: [
+            { document: { id: '1', url: '/doc/a', title: 'A', text: 'text a' } },
+            { document: { id: '2', url: '/doc/b', title: 'B', text: 'text b' } },
+          ],
+          pagination: { total: 3 },
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          data: [
+            { document: { id: '3', url: '/doc/c', title: 'C', text: 'text c' } },
+          ],
+          pagination: { total: 3 },
+        }),
+      })
+
+    const docs = await fetchAllOutlineDocs()
+
+    expect(docs).toHaveLength(3)
+    expect(mockFetch).toHaveBeenCalledTimes(2)
+  })
+
+  it('should skip documents with empty text', async () => {
+    mockFetch
+      .mockReset()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          data: [
+            { document: { id: '1', url: '/doc/a', title: 'Has Content', text: 'Some text' } },
+            { document: { id: '2', url: '/doc/b', title: 'Empty', text: '' } },
+          ],
+          pagination: { total: 2 },
+        }),
+      })
+      // Second call returns empty (no more pages)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ data: [], pagination: { total: 2 } }),
+      })
+
+    const docs = await fetchAllOutlineDocs()
+
+    expect(docs).toHaveLength(1)
+    expect(docs[0].title).toBe('Has Content')
+  })
+
+  it('should throw on API error', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 500,
+      statusText: 'Internal Server Error',
+    })
+
+    await expect(fetchAllOutlineDocs()).rejects.toThrow('Outline API error')
   })
 })
 
